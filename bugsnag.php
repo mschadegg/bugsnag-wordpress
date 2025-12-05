@@ -9,6 +9,11 @@ Author URI: https://bugsnag.com
 License: GPLv2 or later
 */
 
+use Bugsnag\Client;
+use Bugsnag\Handler;
+use Bugsnag\ErrorTypes;
+use Bugsnag\Report;
+
 class Bugsnag_Wordpress
 {
     private static $COMPOSER_AUTOLOADER = 'vendor/autoload.php';
@@ -21,7 +26,7 @@ class Bugsnag_Wordpress
         'url' => 'https://github.com/bugsnag/bugsnag-wordpress',
     );
 
-    private $client;
+    private Client $client;
     private $apiKey;
     private $notifySeverities;
     private $filterFields;
@@ -35,7 +40,7 @@ class Bugsnag_Wordpress
         $this->pluginBase = 'bugsnag/bugsnag.php';
 
         // Run init actions (loading wp user)
-        add_action('init', array($this, 'initActions'));
+        add_action('init', array($this, 'registerUser'));
 
         // Load admin actions (admin links and pages)
         add_action('admin_menu', array($this, 'adminMenuActions'));
@@ -75,13 +80,13 @@ class Bugsnag_Wordpress
     {
         // Activate the bugsnag client
         if (!empty($this->apiKey)) {
-            $this->client = new Bugsnag_Client($this->apiKey);
+            $this->client = Client::make($this->apiKey);
 
             $this->client->setReleaseStage($this->releaseStage())
                          ->setErrorReportingLevel($this->errorReportingLevel())
-                         ->setFilters($this->filterFields());
+                         ->setRedactedKeys($this->filterFields());
 
-            $this->client->mergeDeviceData(['runtimeVersions' => ['wordpress' => get_bloginfo('version')]]);
+            $this->client->getConfig()->mergeDeviceData(['runtimeVersions' => ['wordpress' => get_bloginfo('version')]]);
 
             $this->client->setNotifier(self::$NOTIFIER);
 
@@ -96,8 +101,7 @@ class Bugsnag_Wordpress
 
             if ($set_error_and_exception_handlers === true) {
                 // Hook up automatic error handling
-                set_error_handler(array($this->client, 'errorHandler'));
-                set_exception_handler(array($this->client, 'exceptionHandler'));
+                Handler::register($this->client);
             }
         }
     }
@@ -105,7 +109,7 @@ class Bugsnag_Wordpress
     private function requireBugsnagPhp()
     {
         // Bugsnag-php was already loaded by some 3rd-party code, don't need to load it again.
-        if (class_exists('Bugsnag_Client')) {
+        if (class_exists('Bugsnag\Client')) {
             return true;
         }
 
@@ -142,7 +146,7 @@ class Bugsnag_Wordpress
 
         $severities = explode(',', $notifySeverities);
         foreach ($severities as $severity) {
-            $level |= Bugsnag_ErrorTypes::getLevelsForSeverity($severity);
+            $level |= ErrorTypes::getLevelsForSeverity($severity);
         }
 
         return $level;
@@ -178,35 +182,28 @@ class Bugsnag_Wordpress
     }
 
     // Action hooks
-    public function initActions()
+    public function registerUser()
     {
-        // This should be handled on stage of initializing,
-        // not even adding action if init failed.
-        //
-        // Leaving it here for now.
-        if (empty($this->client)) {
-            return;
-        }
+        $this->client->registerCallback(function(Report $report) {
+            // Set the bugsnag user using the current WordPress user if available,
+            // set as anonymous otherwise.
+            $user = [];
 
-        // Set the bugsnag user using the current WordPress user if available,
-        // set as anonymous otherwise.
-        $user = array();
-        if (is_user_logged_in()) {
-            $wp_user = wp_get_current_user();
+            if (is_user_logged_in()) {
+                $wp_user = wp_get_current_user();
+                $user['id'] = $wp_user->user_login;
+                $user['email'] = $wp_user->user_email;
+                $user['name'] = $wp_user->display_name;
+            } else {
+                $use_unsafe_spoofable_ip_address_getter = apply_filters('bugsnag_use_unsafe_spoofable_ip_address_getter', true);
+                $user['id'] = $use_unsafe_spoofable_ip_address_getter ?
+                    $this->getClientIpAddressUnsafe() :
+                    $this->getClientIpAddress();
+                $user['name'] = 'anonymous';
+            }
 
-            // Removed checks for !empty($wp_user->display_name), it should not be required.
-            $user['id'] = $wp_user->user_login;
-            $user['email'] = $wp_user->user_email;
-            $user['name'] = $wp_user->display_name;
-        } else {
-            $use_unsafe_spoofable_ip_address_getter = apply_filters('bugsnag_use_unsafe_spoofable_ip_address_getter', true);
-            $user['id'] = $use_unsafe_spoofable_ip_address_getter ?
-                $this->getClientIpAddressUnsafe() :
-                $this->getClientIpAddress();
-            $user['name'] = 'anonymous';
-        }
-
-        $this->client->setUser($user);
+            $report->setUser($user);
+        });
     }
 
     // Unsafe: client can spoof address.
@@ -289,14 +286,16 @@ class Bugsnag_Wordpress
         $this->notifySeverities = $_POST['bugsnag_notify_severities'];
         $this->filterFields = $_POST['bugsnag_filterfields'];
 
-        $this->constructBugsnag();
         $this->client->notifyError(
             'BugsnagTest',
             'Testing bugsnag',
-            array(
-                'notifier' => self::$NOTIFIER,
-                'docs' => array('url' => 'https://docs.bugsnag.com/platforms/php/wordpress/'),
-            )
+            function (Report $report) {
+                $report->setSeverity('info');
+                $report->setMetaData([
+                    'notifier' => self::$NOTIFIER,
+                    'docs' => array('url' => 'https://docs.bugsnag.com/platforms/php/wordpress/'),
+                ]);
+            }
         );
 
         die();
@@ -346,7 +345,7 @@ class Bugsnag_Wordpress
             return call_user_func_array(array($this->client, $method), $arguments);
         }
 
-        throw new BadMethodCallException(sprintf('Method %s does not exist on %s or Bugsnag_Client', $method, __CLASS__));
+        throw new BadMethodCallException(sprintf('Method %s does not exist on %s or Bugsnag\Client', $method, __CLASS__));
     }
 }
 
