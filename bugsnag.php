@@ -30,12 +30,16 @@ class Bugsnag_Wordpress
     private $apiKey;
     private $notifySeverities;
     private $filterFields;
+    private $trackSessions;
     private $pluginBase;
 
     public function __construct()
     {
         // Activate bugsnag error monitoring as soon as possible
         $this->activateBugsnag();
+
+        // Start session tracking if enabled as early as possible
+        $this->maybeTrackSession();
 
         $this->pluginBase = 'bugsnag/bugsnag.php';
 
@@ -66,11 +70,13 @@ class Bugsnag_Wordpress
             $this->apiKey = get_option('bugsnag_api_key');
             $this->notifySeverities = get_option('bugsnag_notify_severities');
             $this->filterFields = get_option('bugsnag_filterfields');
+            $this->trackSessions = get_option('bugsnag_track_sessions');
         } else {
             // Multisite
             $this->apiKey = get_site_option('bugsnag_api_key');
             $this->notifySeverities = get_site_option('bugsnag_notify_severities');
             $this->filterFields = get_site_option('bugsnag_filterfields');
+            $this->trackSessions = get_site_option('bugsnag_track_sessions');
         }
 
         $this->constructBugsnag();
@@ -181,6 +187,15 @@ class Bugsnag_Wordpress
         return $release_stage_filtered;
     }
 
+    private function maybeTrackSession()
+    {
+        if(!checked($this->trackSessions, true, false)) {
+            return;
+        }
+
+        $this->client->startSession();
+    }
+
     // Action hooks
     public function registerUser()
     {
@@ -253,12 +268,14 @@ class Bugsnag_Wordpress
         update_site_option('bugsnag_api_key', isset($_POST['bugsnag_api_key']) ? $_POST['bugsnag_api_key'] : '');
         update_site_option('bugsnag_notify_severities', isset($_POST['bugsnag_notify_severities']) ? $_POST['bugsnag_notify_severities'] : '');
         update_site_option('bugsnag_filterfields', isset($_POST['bugsnag_filterfields']) ? $_POST['bugsnag_filterfields'] : '');
+        update_site_option('bugsnag_track_sessions', isset($_POST['bugsnag_track_sessions']) ? $_POST['bugsnag_track_sessions'] : '');
         update_site_option('bugsnag_network', true);
 
         // Update variables
         $this->apiKey = get_site_option('bugsnag_api_key');
         $this->notifySeverities = get_site_option('bugsnag_notify_severities');
         $this->filterFields = get_site_option('bugsnag_filterfields');
+        $this->trackSessions = get_site_option('bugsnag_track_sessions');
 
         echo '<div class="updated"><p>Settings saved.</p></div>';
     }

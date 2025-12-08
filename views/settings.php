@@ -70,6 +70,20 @@
                         </p>
                     </td>
                 </tr>
+
+                <!-- Track Sessions -->
+                <tr valign="top">
+                    <th>
+                        <label for="bugsnag_track_sessions">Track Sessions</label>
+                    </th>
+                    <td>
+                        <input type="checkbox" id="bugsnag_track_sessions" name="bugsnag_track_sessions" value="1" <?php checked($this->trackSessions, true); ?> />
+                        <p class="description">
+                            Enable automatic session tracking to monitor stability metrics in your BugSnag dashboard.
+                            <br> Read more about <a href="https://docs.bugsnag.com/product/stability/" target="_blank">stability metrics</a>.
+                        </p>
+                    </td>
+                </tr>
             </table>
 
             <div class="submit">
